@@ -2,58 +2,64 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.STN import SpatialTransformer, AffineTransformer
+from _gvsl_utils.STN import SpatialTransformer, AffineTransformer
 import numpy as np
+
 
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(out_channels//8, out_channels),
+            nn.GroupNorm(out_channels // 8, out_channels),
             nn.LeakyReLU(0.2),
             nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(out_channels//8, out_channels),
-            nn.LeakyReLU(0.2)
+            nn.GroupNorm(out_channels // 8, out_channels),
+            nn.LeakyReLU(0.2),
         )
 
     def forward(self, x):
         return self.double_conv(x)
+
 
 class DoubleConvK1(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=1),
-            nn.GroupNorm(out_channels//8, out_channels),
+            nn.GroupNorm(out_channels // 8, out_channels),
             nn.LeakyReLU(0.2),
             nn.Conv3d(out_channels, out_channels, kernel_size=1),
-            nn.GroupNorm(out_channels//8, out_channels),
-            nn.LeakyReLU(0.2)
+            nn.GroupNorm(out_channels // 8, out_channels),
+            nn.LeakyReLU(0.2),
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
+
 class Down(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool3d(2),
-            DoubleConv(in_channels, out_channels)
+            nn.MaxPool3d(2), DoubleConv(in_channels, out_channels)
         )
+
     def forward(self, x):
         return self.maxpool_conv(x)
+
 
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
+        self.up = nn.Upsample(scale_factor=2, mode="trilinear", align_corners=True)
         self.conv = DoubleConv(in_channels, out_channels)
+
     def forward(self, x1, x2):
         x1 = self.up(x1)
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
+
 
 class OutConv(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -62,6 +68,7 @@ class OutConv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class UNet_base(nn.Module):
     def __init__(self, n_channels, chs=(32, 64, 128, 256, 512, 256, 128, 64, 32)):
@@ -93,7 +100,17 @@ class UNet_base(nn.Module):
         diffZ = (16 - Z % 16) % 16
         diffY = (16 - Y % 16) % 16
         diffX = (16 - X % 16) % 16
-        x = F.pad(x, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2, diffZ // 2, diffZ - diffZ // 2])
+        x = F.pad(
+            x,
+            [
+                diffX // 2,
+                diffX - diffX // 2,
+                diffY // 2,
+                diffY - diffY // 2,
+                diffZ // 2,
+                diffZ - diffZ // 2,
+            ],
+        )
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -104,7 +121,16 @@ class UNet_base(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
 
-        return x5, x[:, :, diffZ//2: Z+diffZ//2, diffY//2: Y+diffY//2, diffX // 2:X + diffX // 2]
+        return (
+            x5,
+            x[
+                :,
+                :,
+                diffZ // 2 : Z + diffZ // 2,
+                diffY // 2 : Y + diffY // 2,
+                diffX // 2 : X + diffX // 2,
+            ],
+        )
 
 
 class GVSL(nn.Module):
@@ -114,10 +140,12 @@ class GVSL(nn.Module):
         self.f_conv = DoubleConv(1024, 256)
         self.sp_conv = DoubleConv(64, 16)
 
-        self.res_conv = nn.Sequential(nn.Conv3d(32, 16, 3, padding=1),
-                                      nn.GroupNorm(16//4, 16),
-                                      nn.LeakyReLU(0.2),
-                                      nn.Conv3d(16, 1, 1))
+        self.res_conv = nn.Sequential(
+            nn.Conv3d(32, 16, 3, padding=1),
+            nn.GroupNorm(16 // 4, 16),
+            nn.LeakyReLU(0.2),
+            nn.Conv3d(16, 1, 1),
+        )
 
         self.out_flow = nn.Conv3d(16, 3, 3, padding=1)
         self.fc_rot = nn.Linear(256, 3)
@@ -130,7 +158,6 @@ class GVSL(nn.Module):
 
         self.atn = AffineTransformer()
         self.stn = SpatialTransformer()
-
 
     def get_affine_mat(self, rot, scale, translate, shear):
         theta_x = rot[:, 0]
@@ -149,29 +176,53 @@ class GVSL(nn.Module):
         shear_zx = shear[:, 4]
         shear_zy = shear[:, 5]
 
-        rot_mat_x = torch.FloatTensor([[1, 0, 0], [0, torch.cos(theta_x), -torch.sin(theta_x)],
-                                       [0, torch.sin(theta_x), torch.cos(theta_x)]]).cuda()
+        rot_mat_x = torch.FloatTensor(
+            [
+                [1, 0, 0],
+                [0, torch.cos(theta_x), -torch.sin(theta_x)],
+                [0, torch.sin(theta_x), torch.cos(theta_x)],
+            ]
+        ).cuda()
         rot_mat_x = rot_mat_x[np.newaxis, :, :]
-        rot_mat_y = torch.FloatTensor([[torch.cos(theta_y), 0, torch.sin(theta_y)], [0, 1, 0],
-                                       [-torch.sin(theta_y), 0, torch.cos(theta_y)]]).cuda()
+        rot_mat_y = torch.FloatTensor(
+            [
+                [torch.cos(theta_y), 0, torch.sin(theta_y)],
+                [0, 1, 0],
+                [-torch.sin(theta_y), 0, torch.cos(theta_y)],
+            ]
+        ).cuda()
         rot_mat_y = rot_mat_y[np.newaxis, :, :]
         rot_mat_z = torch.FloatTensor(
-            [[torch.cos(theta_z), -torch.sin(theta_z), 0], [torch.sin(theta_z), torch.cos(theta_z), 0],
-             [0, 0, 1]]).cuda()
+            [
+                [torch.cos(theta_z), -torch.sin(theta_z), 0],
+                [torch.sin(theta_z), torch.cos(theta_z), 0],
+                [0, 0, 1],
+            ]
+        ).cuda()
         rot_mat_z = rot_mat_z[np.newaxis, :, :]
-        scale_mat = torch.FloatTensor([[scale_x, 0, 0], [0, scale_y, 0], [0, 0, scale_z]]).cuda()
+        scale_mat = torch.FloatTensor(
+            [[scale_x, 0, 0], [0, scale_y, 0], [0, 0, scale_z]]
+        ).cuda()
         scale_mat = scale_mat[np.newaxis, :, :]
         shear_mat = torch.FloatTensor(
-            [[1, torch.tan(shear_xy), torch.tan(shear_xz)], [torch.tan(shear_yx), 1, torch.tan(shear_yz)],
-             [torch.tan(shear_zx), torch.tan(shear_zy), 1]]).cuda()
+            [
+                [1, torch.tan(shear_xy), torch.tan(shear_xz)],
+                [torch.tan(shear_yx), 1, torch.tan(shear_yz)],
+                [torch.tan(shear_zx), torch.tan(shear_zy), 1],
+            ]
+        ).cuda()
         trans = torch.FloatTensor([trans_x, trans_y, trans_z]).cuda()
         trans = trans[np.newaxis, :, np.newaxis]
-        mat = torch.matmul(shear_mat,
-                           torch.matmul(scale_mat, torch.matmul(rot_mat_z, torch.matmul(rot_mat_y, rot_mat_x))))
+        mat = torch.matmul(
+            shear_mat,
+            torch.matmul(
+                scale_mat, torch.matmul(rot_mat_z, torch.matmul(rot_mat_y, rot_mat_x))
+            ),
+        )
         mat = torch.cat([mat, trans], dim=-1)
         return mat
 
-    def Affine(self, m, f): # Affine transformation
+    def Affine(self, m, f):  # Affine transformation
         x = torch.cat([m, f], dim=1)
         x = self.f_conv(x)
         xcor = self.gap(x).flatten(start_dim=1, end_dim=4)
@@ -187,7 +238,7 @@ class GVSL(nn.Module):
         mat = self.get_affine_mat(rot, scl, trans, shear)
         return mat
 
-    def Spatial(self, m, f):    # Deformable transformation
+    def Spatial(self, m, f):  # Deformable transformation
         x = torch.cat([m, f], dim=1)
         sp_cor = self.sp_conv(x)
         flow = self.out_flow(sp_cor)
