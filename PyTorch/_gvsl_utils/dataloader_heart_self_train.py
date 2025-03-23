@@ -5,6 +5,7 @@ from torch.utils import data
 import numpy as np
 from utils import get_pretrain_datalist
 from dataset.preprocess_monai import get_base_transforms
+from skimage.measure import block_reduce
 
 
 def is_image_file(filename):
@@ -43,7 +44,10 @@ class DatasetFromFolder3D(data.Dataset):
         # unlabed_img1 = sitk.GetArrayFromImage(unlabed_img1)
 
         unlabed_img1 = {"image": self.unlabeled_filenames[random_index]}
-        unlabed_img1 = self.transform(unlabed_img1)["image"].squeeze(dim=0).numpy()
+        unlabed_img1 = self.transform(unlabed_img1)["image"].numpy()
+        # _, c, d, h, w = unlabed_img1.shape
+        # unlabed_img1 = unlabed_img1.view(c, d, h, w).numpy()
+        unlabed_img1 = block_reduce(unlabed_img1, block_size=(1, 2, 2, 2), func=np.mean)
 
         unlabed_img1 = np.where(unlabed_img1 < 0.0, 0.0, unlabed_img1)
         unlabed_img1 = np.where(unlabed_img1 > 2048.0, 2048.0, unlabed_img1)
@@ -61,7 +65,8 @@ class DatasetFromFolder3D(data.Dataset):
         # unlabed_img2 = sitk.GetArrayFromImage(unlabed_img2)
 
         unlabed_img2 = {"image": self.unlabeled_filenames[random_index]}
-        unlabed_img2 = self.transform(unlabed_img2)["image"].squeeze(dim=0).numpy()
+        unlabed_img2 = self.transform(unlabed_img2)["image"].numpy()
+        unlabed_img2 = block_reduce(unlabed_img2, block_size=(1, 2, 2, 2), func=np.mean)
         unlabed_img2 = np.where(unlabed_img2 < 0.0, 0.0, unlabed_img2)
         unlabed_img2 = np.where(unlabed_img2 > 2048.0, 2048.0, unlabed_img2)
         unlabed_img2 = unlabed_img2 / 2048.0
@@ -92,4 +97,6 @@ class DatasetFromFolder3D(data.Dataset):
 if __name__ == "__main__":
     datalist = get_pretrain_datalist(img_list=True)
     ds = DatasetFromFolder3D(datalist=datalist)
+    e = ds[0]
+    print(e[0].shape, e[1].shape)
     pass
