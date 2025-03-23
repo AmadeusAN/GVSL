@@ -47,13 +47,13 @@ class DatasetFromFolder3D(data.Dataset):
         unlabed_img1 = self.transform(unlabed_img1)["image"].numpy()
         # _, c, d, h, w = unlabed_img1.shape
         # unlabed_img1 = unlabed_img1.view(c, d, h, w).numpy()
-        unlabed_img1 = block_reduce(unlabed_img1, block_size=(1, 2, 2, 2), func=np.mean)
+        unlabed_img1 = block_reduce(unlabed_img1, block_size=(1, 3, 3, 3), func=np.mean)
 
         unlabed_img1 = np.where(unlabed_img1 < 0.0, 0.0, unlabed_img1)
         unlabed_img1 = np.where(unlabed_img1 > 2048.0, 2048.0, unlabed_img1)
         unlabed_img1 = unlabed_img1 / 2048.0
         unlabed_img1 = unlabed_img1.astype(np.float32)
-        unlabed_img1 = unlabed_img1[np.newaxis, :, :, :]
+        # unlabed_img1 = unlabed_img1[np.newaxis, :, :, :]
 
         random_index = np.random.randint(low=0, high=len(self.unlabeled_filenames))
         # unlabed_img2 = sitk.ReadImage(
@@ -66,12 +66,12 @@ class DatasetFromFolder3D(data.Dataset):
 
         unlabed_img2 = {"image": self.unlabeled_filenames[random_index]}
         unlabed_img2 = self.transform(unlabed_img2)["image"].numpy()
-        unlabed_img2 = block_reduce(unlabed_img2, block_size=(1, 2, 2, 2), func=np.mean)
+        unlabed_img2 = block_reduce(unlabed_img2, block_size=(1, 3, 3, 3), func=np.mean)
         unlabed_img2 = np.where(unlabed_img2 < 0.0, 0.0, unlabed_img2)
         unlabed_img2 = np.where(unlabed_img2 > 2048.0, 2048.0, unlabed_img2)
         unlabed_img2 = unlabed_img2 / 2048.0
         unlabed_img2 = unlabed_img2.astype(np.float32)
-        unlabed_img2 = unlabed_img2[np.newaxis, :, :, :]
+        # unlabed_img2 = unlabed_img2[np.newaxis, :, :, :]
 
         return unlabed_img1, unlabed_img2
 

@@ -134,8 +134,7 @@ class UNet_base(nn.Module):
 
 
 class GVSL(nn.Module):
-    # def __init__(self, n_channels=1, chan=(32, 64, 128, 256, 512, 256, 128, 64, 32)):
-    def __init__(self, n_channels=1, chan=(16, 32, 64, 128, 256, 128, 64, 32, 16)):
+    def __init__(self, n_channels=1, chan=(32, 64, 128, 256, 512, 256, 128, 64, 32)):
         super(GVSL, self).__init__()
         self.unet = UNet_base(n_channels=n_channels, chs=chan)
         self.f_conv = DoubleConv(1024, 256)
