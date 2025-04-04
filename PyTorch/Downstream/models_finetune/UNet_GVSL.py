@@ -2,57 +2,68 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.STN import SpatialTransformer, AffineTransformer
+from net.pretrain.GVSL.PyTorch._gvsl_utils.STN import (
+    SpatialTransformer,
+    AffineTransformer,
+)
+from utils import config
 import numpy as np
+
 
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(out_channels//8, out_channels),
+            nn.GroupNorm(out_channels // 8, out_channels),
             nn.LeakyReLU(0.2),
             nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(out_channels//8, out_channels),
-            nn.LeakyReLU(0.2)
+            nn.GroupNorm(out_channels // 8, out_channels),
+            nn.LeakyReLU(0.2),
         )
 
     def forward(self, x):
         return self.double_conv(x)
+
+
 class DoubleConvK1(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=1),
-            nn.GroupNorm(out_channels//8, out_channels),
+            nn.GroupNorm(out_channels // 8, out_channels),
             nn.LeakyReLU(0.2),
             nn.Conv3d(out_channels, out_channels, kernel_size=1),
-            nn.GroupNorm(out_channels//8, out_channels),
-            nn.LeakyReLU(0.2)
+            nn.GroupNorm(out_channels // 8, out_channels),
+            nn.LeakyReLU(0.2),
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
+
 class Down(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool3d(2),
-            DoubleConv(in_channels, out_channels)
+            nn.MaxPool3d(2), DoubleConv(in_channels, out_channels)
         )
+
     def forward(self, x):
         return self.maxpool_conv(x)
+
 
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
+        self.up = nn.Upsample(scale_factor=2, mode="trilinear", align_corners=True)
         self.conv = DoubleConv(in_channels, out_channels)
+
     def forward(self, x1, x2):
         x1 = self.up(x1)
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
+
 
 class OutConv(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -61,6 +72,7 @@ class OutConv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
 
 class UNet_base(nn.Module):
     def __init__(self, n_channels, chs=(32, 64, 128, 256, 512, 256, 128, 64, 32)):
@@ -92,7 +104,17 @@ class UNet_base(nn.Module):
         diffZ = (16 - Z % 16) % 16
         diffY = (16 - Y % 16) % 16
         diffX = (16 - X % 16) % 16
-        x = F.pad(x, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2, diffZ // 2, diffZ - diffZ // 2])
+        x = F.pad(
+            x,
+            [
+                diffX // 2,
+                diffX - diffX // 2,
+                diffY // 2,
+                diffY - diffY // 2,
+                diffZ // 2,
+                diffZ - diffZ // 2,
+            ],
+        )
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -103,20 +125,33 @@ class UNet_base(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
 
-        return x5, x[:, :, diffZ//2: Z+diffZ//2, diffY//2: Y+diffY//2, diffX // 2:X + diffX // 2]
+        return (
+            x5,
+            x[
+                :,
+                :,
+                diffZ // 2 : Z + diffZ // 2,
+                diffY // 2 : Y + diffY // 2,
+                diffX // 2 : X + diffX // 2,
+            ],
+        )
 
 
 class GVSL(nn.Module):
-    def __init__(self, n_channels=1, chan=(32, 64, 128, 256, 512, 256, 128, 64, 32), win=3):
+    def __init__(
+        self, n_channels=1, chan=(32, 64, 128, 256, 512, 256, 128, 64, 32), win=3
+    ):
         super(GVSL, self).__init__()
         self.unet = UNet_base(n_channels=n_channels, chs=chan)
         self.f_conv = DoubleConv(1024, 256)
         self.sp_conv = DoubleConv(64, 16)
 
-        self.res_conv = nn.Sequential(nn.Conv3d(32, 16, 3, padding=1),
-                                      nn.GroupNorm(16//4, 16),
-                                      nn.LeakyReLU(0.2),
-                                      nn.Conv3d(16, 1, 1))
+        self.res_conv = nn.Sequential(
+            nn.Conv3d(32, 16, 3, padding=1),
+            nn.GroupNorm(16 // 4, 16),
+            nn.LeakyReLU(0.2),
+            nn.Conv3d(16, 1, 1),
+        )
 
         self.out_flow = nn.Conv3d(16, 3, 3, padding=1)
         self.fc_rot = nn.Linear(256, 3)
@@ -149,25 +184,49 @@ class GVSL(nn.Module):
         shear_zx = shear[:, 4]
         shear_zy = shear[:, 5]
 
-        rot_mat_x = torch.FloatTensor([[1, 0, 0], [0, torch.cos(theta_x), -torch.sin(theta_x)],
-                                       [0, torch.sin(theta_x), torch.cos(theta_x)]]).cuda()
+        rot_mat_x = torch.FloatTensor(
+            [
+                [1, 0, 0],
+                [0, torch.cos(theta_x), -torch.sin(theta_x)],
+                [0, torch.sin(theta_x), torch.cos(theta_x)],
+            ]
+        ).cuda()
         rot_mat_x = rot_mat_x[np.newaxis, :, :]
-        rot_mat_y = torch.FloatTensor([[torch.cos(theta_y), 0, torch.sin(theta_y)], [0, 1, 0],
-                                       [-torch.sin(theta_y), 0, torch.cos(theta_y)]]).cuda()
+        rot_mat_y = torch.FloatTensor(
+            [
+                [torch.cos(theta_y), 0, torch.sin(theta_y)],
+                [0, 1, 0],
+                [-torch.sin(theta_y), 0, torch.cos(theta_y)],
+            ]
+        ).cuda()
         rot_mat_y = rot_mat_y[np.newaxis, :, :]
         rot_mat_z = torch.FloatTensor(
-            [[torch.cos(theta_z), -torch.sin(theta_z), 0], [torch.sin(theta_z), torch.cos(theta_z), 0],
-             [0, 0, 1]]).cuda()
+            [
+                [torch.cos(theta_z), -torch.sin(theta_z), 0],
+                [torch.sin(theta_z), torch.cos(theta_z), 0],
+                [0, 0, 1],
+            ]
+        ).cuda()
         rot_mat_z = rot_mat_z[np.newaxis, :, :]
-        scale_mat = torch.FloatTensor([[scale_x, 0, 0], [0, scale_y, 0], [0, 0, scale_z]]).cuda()
+        scale_mat = torch.FloatTensor(
+            [[scale_x, 0, 0], [0, scale_y, 0], [0, 0, scale_z]]
+        ).cuda()
         scale_mat = scale_mat[np.newaxis, :, :]
         shear_mat = torch.FloatTensor(
-            [[1, torch.tan(shear_xy), torch.tan(shear_xz)], [torch.tan(shear_yx), 1, torch.tan(shear_yz)],
-             [torch.tan(shear_zx), torch.tan(shear_zy), 1]]).cuda()
+            [
+                [1, torch.tan(shear_xy), torch.tan(shear_xz)],
+                [torch.tan(shear_yx), 1, torch.tan(shear_yz)],
+                [torch.tan(shear_zx), torch.tan(shear_zy), 1],
+            ]
+        ).cuda()
         trans = torch.FloatTensor([trans_x, trans_y, trans_z]).cuda()
         trans = trans[np.newaxis, :, np.newaxis]
-        mat = torch.matmul(shear_mat,
-                           torch.matmul(scale_mat, torch.matmul(rot_mat_z, torch.matmul(rot_mat_y, rot_mat_x))))
+        mat = torch.matmul(
+            shear_mat,
+            torch.matmul(
+                scale_mat, torch.matmul(rot_mat_z, torch.matmul(rot_mat_y, rot_mat_x))
+            ),
+        )
         mat = torch.cat([mat, trans], dim=-1)
         return mat
 
@@ -215,14 +274,18 @@ class GVSL(nn.Module):
 
 
 class UNet3D_GVSL(nn.Module):
-    def __init__(self, n_channels=1, n_classes=1, chs=(32, 64, 128, 256, 512, 256, 128, 64, 32)):
+    def __init__(
+        self,
+        n_channels=1,
+        n_classes=1,
+        chs=(32, 64, 128, 256, 512, 256, 128, 64, 32),
+        pretrain_weight_path: str = None,
+    ):
         super(UNet3D_GVSL, self).__init__()
         self.n_channels = n_channels
 
         self.unet_pre = GVSL()
-        self.unet_pre.load_state_dict(
-            torch.load(
-                '{0}/{1}_epoch_{2}.pth'.format('pre_weight/', 'GVSL', str(1000))))
+        self.unet_pre.load_state_dict(torch.load(pretrain_weight_path))
         self.unet = self.unet_pre.unet
 
         self.out_conv = nn.Conv3d(chs[-1], n_classes, kernel_size=3, padding=1)
@@ -233,5 +296,17 @@ class UNet3D_GVSL(nn.Module):
         _, x = self.unet(x)
         out = self.out_conv(x)
 
-        return self.softmax(out)
+        # return self.softmax(out)
+        return out
 
+
+if __name__ == "__main__":
+    # test the model
+    model = UNet3D_GVSL(
+        n_classes=config.num_classes,
+        pretrain_weight_path="/public1/cjh/workspace/AbdominalSegmentation/tensorboard_log/pretrain/pretrain_GVSL/GVSL_epoch_1000.pth",
+    )
+    x = torch.randn(2, 1, 64, 64, 64)
+    y = model(x)
+    print(y.shape)  # should be [1, n_classes, 64, 64, 64]
+    pass
