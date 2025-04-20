@@ -14,6 +14,7 @@ from _gvsl_utils.gvsl_utils import AverageMeter
 import numpy as np
 from utils import config, get_pretrain_datalist
 from pathlib import Path
+from torch.cuda.amp import autocast, GradScaler
 
 
 class Trainer(object):
@@ -37,6 +38,7 @@ class Trainer(object):
         self.lr = lr
         # self.unlabeled_dir = unlabeled_dir
         self.datalist = datalist
+        self.scalar = GradScaler()
 
         self.results_dir = results_dir
         self.checkpoint_dir = checkpoint_dir
@@ -105,20 +107,29 @@ class Trainer(object):
 
     def train_iterator(self, unlabed_img1, unlabed_img1_aug, unlabed_img2):
 
-        res_A, warp_BA, aff_mat_BA, flow_BA = self.gvsl(unlabed_img1_aug, unlabed_img2)
-        loss_ncc = self.L_ncc(warp_BA, unlabed_img1)
-        self.L_ncc_log.update(loss_ncc.data, unlabed_img1.size(0))
+        with autocast():
+            res_A, warp_BA, aff_mat_BA, flow_BA = self.gvsl(
+                unlabed_img1_aug, unlabed_img2
+            )
 
-        loss_mse = self.L_mse(res_A, unlabed_img1)
-        self.L_MSE_log.update(loss_mse.data, unlabed_img1.size(0))
+            loss_ncc = self.L_ncc(warp_BA, unlabed_img1)
+            self.L_ncc_log.update(loss_ncc.data, unlabed_img1.size(0))
 
-        loss_smooth = self.L_smooth(flow_BA)
-        self.L_smooth_log.update(loss_smooth.data, unlabed_img1.size(0))
+            loss_mse = self.L_mse(res_A, unlabed_img1)
+            self.L_MSE_log.update(loss_mse.data, unlabed_img1.size(0))
 
-        loss = loss_ncc + loss_mse + loss_smooth
+            loss_smooth = self.L_smooth(flow_BA)
+            self.L_smooth_log.update(loss_smooth.data, unlabed_img1.size(0))
 
-        loss.backward()
-        self.opt.step()
+            loss = loss_ncc + loss_mse + loss_smooth
+
+        # loss.backward()
+        # self.opt.step()
+
+        self.scalar.scale(loss).backward()
+        self.scalar.step(self.opt)
+        self.scalar.update()
+
         self.gvsl.zero_grad()
         self.opt.zero_grad()
 
