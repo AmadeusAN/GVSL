@@ -15,6 +15,7 @@ import numpy as np
 from utils import config, get_pretrain_datalist
 from pathlib import Path
 from torch.cuda.amp import autocast, GradScaler
+from thop import profile, clever_format
 
 
 class Trainer(object):
@@ -30,6 +31,7 @@ class Trainer(object):
         datalist=[],
         results_dir="results",
         checkpoint_dir=Path(config.tensorboard_dir) / "pretrain" / "pretrain_GVSL",
+        thop_test: bool = False,
     ):
         super(Trainer, self).__init__()
         self.k = k
@@ -43,6 +45,7 @@ class Trainer(object):
         self.results_dir = results_dir
         self.checkpoint_dir = checkpoint_dir
         self.model_name = model_name
+        self.thop_tes = thop_test
 
         # Data augmentation
         self.spatial_aug = SpatialTransform(
@@ -107,6 +110,18 @@ class Trainer(object):
 
     def train_iterator(self, unlabed_img1, unlabed_img1_aug, unlabed_img2):
 
+        if self.thop_tes:
+            unlabed_img1_aug, unlabed_img2 = unlabed_img1_aug.cpu(), unlabed_img2.cpu()
+            self.gvsl.cpu()
+            b = unlabed_img2.shape[0]
+            macs, params = profile(
+                model=self.gvsl, inputs=(unlabed_img1_aug, unlabed_img2)
+            )
+            macs, params = macs / b, params / b
+            macs, params = clever_format([macs, params], "%.3f")
+            print(macs, params)
+            return
+
         with autocast():
             res_A, warp_BA, aff_mat_BA, flow_BA = self.gvsl(
                 unlabed_img1_aug, unlabed_img2
@@ -159,6 +174,8 @@ class Trainer(object):
             unlabed_img2 = self.spatial_aug.augment_spatial(unlabed_img2, mat, code_spa)
 
             self.train_iterator(unlabed_img1, unlabed_img1_aug, unlabed_img2)
+            if self.thop_tes:
+                return
             res = "\t".join(
                 [
                     "Epoch: [%d/%d]" % (epoch + 1, self.epoches),
@@ -193,6 +210,8 @@ class Trainer(object):
             self.L_MSE_log.reset()
             self.L_smooth_log.reset()
             self.train_epoch(epoch + self.k)
+            if self.thop_tes:
+                return
             if epoch % 20 == 0:
                 self.checkpoint(epoch)
         self.checkpoint(self.epoches - self.k)
@@ -200,6 +219,6 @@ class Trainer(object):
 
 if __name__ == "__main__":
     datalist = get_pretrain_datalist(img_list=True)
-    trainer = Trainer(datalist=datalist)
+    trainer = Trainer(datalist=datalist, thop_test=True)
     # trainer.load()
     trainer.train()
