@@ -304,7 +304,7 @@ if __name__ == "__main__":
     # test the model
     model = UNet3D_GVSL(
         n_classes=config.num_classes,
-        pretrain_weight_path="/public1/cjh/workspace/AbdominalSegmentation/tensorboard_log/pretrain/pretrain_GVSL/GVSL_epoch_1000.pth",
+        pretrain_weight_path="/public/cjh/workspace/AbdominalSegmentation/tensorboard_log/AMOS/pretrain_AMOS/pretrain_GVSL/GVSL_epoch_1000.pth",
     )
     x = torch.randn(2, 1, 64, 64, 64)
     y = model(x)
