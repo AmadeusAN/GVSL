@@ -30,7 +30,7 @@ class Trainer(object):
         # unlabeled_dir="",
         datalist=[],
         results_dir="results",
-        checkpoint_dir=Path(config.tensorboard_dir) / "pretrain" / "pretrain_GVSL",
+        checkpoint_dir=Path(config.tensorboard_dir) / "pretrain" / "pretrain_GVSL_RAOS",
         thop_test: bool = False,
     ):
         super(Trainer, self).__init__()
@@ -218,7 +218,10 @@ class Trainer(object):
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     datalist = get_pretrain_datalist(img_list=True)
-    trainer = Trainer(datalist=datalist, thop_test=True)
+    trainer = Trainer(datalist=datalist, thop_test=False)
     # trainer.load()
     trainer.train()
